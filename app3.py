@@ -19,7 +19,7 @@ st.set_page_config(page_title="H&J Academy YouTube Dashboard", layout="wide")
 # ---------------------------
 # 1. Load Data from PostgreSQL
 # ---------------------------
-# Access secrets from the [postgresql] table
+# Accessing secrets from the [postgresql] table
 db_user = st.secrets["postgresql"]["user"]
 db_password = st.secrets["postgresql"]["password"]
 db_host = st.secrets["postgresql"]["host"]
@@ -165,47 +165,44 @@ with tabs[0]:
 with tabs[1]:
     st.header("Video Trends")
 
-    # ---- 1. Compute last day views and compare to the previous day ----
+    
     if not filtered_data.empty:
-        # Sort by 'day' to ensure last day is at the end
+        
         sorted_data = filtered_data.sort_values('day')
         
-        # Identify last day
+       
         last_day = sorted_data['day'].max()
-        # Identify the day before the last day (assuming at least 2 rows exist)
-        # We'll call it "previous_day"
         
-        # Edge case: If there's only 1 day of data, we can't compare
+        
+        
         unique_days = sorted_data['day'].unique()
         if len(unique_days) > 1:
-            # The day before the last day is the second to last unique day
+            
             previous_day = unique_days[-2]
             
-            # Grab views from the last day
+            
             last_day_views = sorted_data.loc[sorted_data['day'] == last_day, 'views'].sum()
-            # Grab views from the previous day
+            
             previous_day_views = sorted_data.loc[sorted_data['day'] == previous_day, 'views'].sum()
             
-            # Calculate absolute difference
+           
             diff_views = last_day_views - previous_day_views
             
-            # Calculate % difference (avoid dividing by zero)
+            
             if previous_day_views != 0:
                 pct_change = (diff_views / previous_day_views) * 100
             else:
                 pct_change = 0
         else:
-            # If there's only 1 day in the data
+            
             last_day_views = sorted_data['views'].sum()
             diff_views = 0
             pct_change = 0
         
-        # Build a string for delta
-        # st.metric's delta can be "±X" or "±X%" for a percentage.
-        # We'll do a percentage sign:
+       
         delta_str = f"{pct_change:.2f}%"
         
-        # Use st.metric to display the last day’s views plus delta
+        
         st.metric(
             label="Last Day Views",
             value=f"{last_day_views:,.0f}",
@@ -451,18 +448,16 @@ with tabs[6]:
 with tabs[7]:
     st.header("Advanced Metrics & Engagement Analysis")
 
-    # Subsample or filter if you have too many rows (optional)
-    # e.g., random sample of 300 rows
+   
     if len(daily_video_metrics) > 300:
         df_sample = daily_video_metrics.sample(n=300, random_state=42)
     else:
         df_sample = daily_video_metrics.copy()
 
-    # Select columns you want in the parallel coordinates plot
-    # If you have large numeric ranges (views in thousands, etc.), consider scaling
+    
     features_for_parallel = ['views', 'estimatedMinutesWatched', 'averageViewDuration', 'subscribersGained']
 
-    # Example: min-max scale each selected feature
+    
     df_scaled = df_sample.copy()
     for col in features_for_parallel:
         col_min = df_scaled[col].min()
@@ -481,9 +476,7 @@ with tabs[7]:
         title="Parallel Coordinates: Scaled Video Performance Metrics"
     )
 
-    # Optionally reorder the dimension list, or add any custom dimension settings
-    # e.g. dimension = dict(range=[0,1], label='Views', values=df_scaled['views']) in a more advanced approach
-
+    
     st.plotly_chart(fig9, use_container_width=True)
     
     st.subheader("Box Plot: Average View Duration by Cluster")
@@ -551,7 +544,7 @@ with tabs[8]:
     from sklearn.metrics import mean_squared_error, r2_score
     import seaborn as sns
     
-    # Define a list of core features from daily_video_metrics
+    
     selected_features = ['views', 'estimatedMinutesWatched','averageViewDuration', 'cpm','subscribersGained']
     
     
@@ -560,7 +553,7 @@ with tabs[8]:
         if col in ml_data.columns:
             selected_features.append(col)
     
-    # Optionally, add one-hot encoded day-of-week columns if they exist
+    
     day_columns = [col for col in ml_data.columns if col.startswith('day_')]
     if day_columns:
         selected_features.extend(day_columns)
@@ -568,36 +561,36 @@ with tabs[8]:
     st.write("### Features Used for Prediction:")
     st.write(selected_features)
     
-    # Create the feature set and target variable
+    
     features = ml_data[selected_features]
     target = ml_data['estimatedRevenue']
     
     st.markdown("### Correlation Analysis")
 
-    # Combining features + target into one DataFrame for correlation
+   
     corr_data = ml_data[selected_features + ['estimatedRevenue']].corr()
     
-    # Displaying the correlation matrix numerically
+    
     st.write("#### Numerical Correlation Matrix")
     st.write(corr_data)
     
-    # Displaying a correlation heatmap
+    
     fig, ax = plt.subplots(figsize=(10, 8))
     sns.heatmap(corr_data, annot=True, cmap='coolwarm', ax=ax)
     st.pyplot(fig)
 
     
-    # Split the data into training and testing sets
+    
     X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, random_state=42)
     
-    # Initialize and train the Random Forest model
+   
     model_rf = RandomForestRegressor(n_estimators=100, random_state=42)
     model_rf.fit(X_train, y_train)
     
-    # Predict on the test set
+ 
     y_pred = model_rf.predict(X_test)
     
-    # Evaluate the model
+    
     mse = mean_squared_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
     
@@ -615,7 +608,7 @@ with tabs[8]:
     
     st.write(feature_importances)
     
-    # Plot feature importance using Plotly
+   
     fig_importance = px.bar(feature_importances, x='Feature', y='Importance',
                             title="Feature Importance for Revenue Prediction",
                             labels={'Importance': 'Importance Score'})
