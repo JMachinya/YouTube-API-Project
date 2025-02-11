@@ -159,11 +159,67 @@ with tabs[0]:
     st.markdown("### Upload Recommendation")
     st.info(recommendation)
 
+    
+
 # ----- Video Trends Tab -----
 with tabs[1]:
     st.header("Video Trends")
+
+    # ---- 1. Compute last day views and compare to the previous day ----
+    if not filtered_data.empty:
+        # Sort by 'day' to ensure last day is at the end
+        sorted_data = filtered_data.sort_values('day')
+        
+        # Identify last day
+        last_day = sorted_data['day'].max()
+        # Identify the day before the last day (assuming at least 2 rows exist)
+        # We'll call it "previous_day"
+        
+        # Edge case: If there's only 1 day of data, we can't compare
+        unique_days = sorted_data['day'].unique()
+        if len(unique_days) > 1:
+            # The day before the last day is the second to last unique day
+            previous_day = unique_days[-2]
+            
+            # Grab views from the last day
+            last_day_views = sorted_data.loc[sorted_data['day'] == last_day, 'views'].sum()
+            # Grab views from the previous day
+            previous_day_views = sorted_data.loc[sorted_data['day'] == previous_day, 'views'].sum()
+            
+            # Calculate absolute difference
+            diff_views = last_day_views - previous_day_views
+            
+            # Calculate % difference (avoid dividing by zero)
+            if previous_day_views != 0:
+                pct_change = (diff_views / previous_day_views) * 100
+            else:
+                pct_change = 0
+        else:
+            # If there's only 1 day in the data
+            last_day_views = sorted_data['views'].sum()
+            diff_views = 0
+            pct_change = 0
+        
+        # Build a string for delta
+        # st.metric's delta can be "±X" or "±X%" for a percentage.
+        # We'll do a percentage sign:
+        delta_str = f"{pct_change:.2f}%"
+        
+        # Use st.metric to display the last day’s views plus delta
+        st.metric(
+            label="Last Day Views",
+            value=f"{last_day_views:,.0f}",
+            delta=delta_str
+        )
+    else:
+        st.write("No data available for metric comparison.")
+    
+    
     fig1 = px.line(filtered_data, x='day', y='views', title="Daily Views Over Time")
     st.plotly_chart(fig1, use_container_width=True)
+    
+    st.subheader("Featured Video")
+    st.video("https://www.youtube.com/watch?v=QtfqiBUDVGs&t=647s")
     
     fig2 = px.line(filtered_data, x='day', y='views_7_day_avg', title="7-Day Rolling Average of Views")
     st.plotly_chart(fig2, use_container_width=True)
@@ -184,7 +240,6 @@ with tabs[2]:
                      title="Views vs. Estimated Revenue", trendline="ols")
     st.plotly_chart(fig5, use_container_width=True)
 
-# ----- Geographic Analysis Tab -----
 with tabs[3]:
     st.header("Geographic Analysis")
     
@@ -210,6 +265,65 @@ with tabs[3]:
         title='Views by Country'
     )
     st.plotly_chart(fig6, use_container_width=True)
+    
+    # ----------------------------------------
+    # TOP 10 COUNTRIES BY VIEWS
+    # ----------------------------------------
+    st.subheader("Top 10 Countries by Views")
+
+    top_countries = (
+        daily_country_specific_metrics
+        .groupby('country', as_index=False)['views']
+        .sum()
+        .sort_values('views', ascending=False)
+        .head(10)
+    )
+
+    st.write("Here are the 10 countries with the highest total views:")
+    st.dataframe(top_countries)
+
+    fig_top_countries = px.bar(
+        top_countries,
+        x='views',
+        y='country',
+        orientation='h',
+        color='views',
+        color_continuous_scale='Blues',
+        title='Top 10 Countries by Total Views',
+        labels={'country': 'Country', 'views': 'Total Views'}
+    )
+
+    fig_top_countries.update_layout(
+        template='plotly_dark',
+        xaxis=dict(title='Total Views', showgrid=False),
+        yaxis=dict(title='', showgrid=False),
+        coloraxis_showscale=False
+    )
+    fig_top_countries.update_xaxes(tickformat=",")
+    st.plotly_chart(fig_top_countries, use_container_width=True)
+
+    # ----------------------------------------
+    # DEMOGRAPHICS: AGE GROUP + GENDER
+    # ----------------------------------------
+    st.subheader("Viewer Demographics (Age & Gender)")
+
+    
+    df_demo = pd.read_sql("SELECT * FROM demographic_metrics", engine)
+    
+
+    df_demo['viewerPercentage'] = pd.to_numeric(df_demo['viewerPercentage'], errors='coerce')
+    
+    fig_demo = px.bar(
+        df_demo,
+        x='ageGroup',
+        y='viewerPercentage',
+        color='gender',
+        barmode='group',
+        title="Viewer Percentage by Age Group & Gender"
+    )
+    st.plotly_chart(fig_demo, use_container_width=True)
+
+
 
 # ----- Clustering Tab -----
 with tabs[4]:
@@ -259,7 +373,7 @@ with tabs[5]:
     st.markdown("### Forecasted Values for the Next {} Days".format(forecast_period))
     st.write(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(forecast_period))
     
-    # Optionally, plotting forecast components for more insights
+    
     st.markdown("### Forecast Components")
     fig_components = model.plot_components(forecast)
     st.pyplot(fig_components)
@@ -336,15 +450,40 @@ with tabs[6]:
 # ----- Advanced Metrics & Engagement Analysis Tab -----
 with tabs[7]:
     st.header("Advanced Metrics & Engagement Analysis")
-    
-    st.subheader("Parallel Coordinates Plot")
+
+    # Subsample or filter if you have too many rows (optional)
+    # e.g., random sample of 300 rows
+    if len(daily_video_metrics) > 300:
+        df_sample = daily_video_metrics.sample(n=300, random_state=42)
+    else:
+        df_sample = daily_video_metrics.copy()
+
+    # Select columns you want in the parallel coordinates plot
+    # If you have large numeric ranges (views in thousands, etc.), consider scaling
+    features_for_parallel = ['views', 'estimatedMinutesWatched', 'averageViewDuration', 'subscribersGained']
+
+    # Example: min-max scale each selected feature
+    df_scaled = df_sample.copy()
+    for col in features_for_parallel:
+        col_min = df_scaled[col].min()
+        col_max = df_scaled[col].max()
+        if col_max != col_min:
+            df_scaled[col] = (df_scaled[col] - col_min) / (col_max - col_min)
+
+    st.subheader("Parallel Coordinates Plot (Improved)")
+
+    # We'll color by 'views' after scaling, so lines with higher (scaled) 'views' appear in a different color
     fig9 = px.parallel_coordinates(
-        daily_video_metrics,
-        dimensions=['views', 'estimatedMinutesWatched', 'averageViewDuration', 'subscribersGained'],
-        color='views',
+        df_scaled,
+        dimensions=features_for_parallel,
+        color='views',  # now scaled [0..1]
         color_continuous_scale=px.colors.diverging.Tealrose,
-        title="Parallel Coordinates: Video Performance Metrics"
+        title="Parallel Coordinates: Scaled Video Performance Metrics"
     )
+
+    # Optionally reorder the dimension list, or add any custom dimension settings
+    # e.g. dimension = dict(range=[0,1], label='Views', values=df_scaled['views']) in a more advanced approach
+
     st.plotly_chart(fig9, use_container_width=True)
     
     st.subheader("Box Plot: Average View Duration by Cluster")
@@ -396,8 +535,8 @@ with tabs[8]:
     annotation_data['day'] = pd.to_datetime(annotation_data['day'])
     ml_data = pd.merge(ml_data, annotation_data, on='day', how='inner')
     
-    # Optionally, if ml_data has a 'day_name' column (e.g., from daily_video_metrics),
-    # convert it to one-hot encoded columns
+    
+    # converting it to one-hot encoded columns
     if 'day_name' in ml_data.columns:
         dummies = pd.get_dummies(ml_data['day_name'], prefix='day')
         ml_data = pd.concat([ml_data, dummies], axis=1)
@@ -410,11 +549,12 @@ with tabs[8]:
     from sklearn.model_selection import train_test_split
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.metrics import mean_squared_error, r2_score
+    import seaborn as sns
     
     # Define a list of core features from daily_video_metrics
-    selected_features = ['views', 'estimatedMinutesWatched','averageViewDuration', 'subscribersGained']
+    selected_features = ['views', 'estimatedMinutesWatched','averageViewDuration', 'cpm','subscribersGained']
     
-    # Optionally, add additional features from daily_annotation_metrics if they exist
+    
     additional_columns = ['likes']
     for col in additional_columns:
         if col in ml_data.columns:
@@ -432,6 +572,21 @@ with tabs[8]:
     features = ml_data[selected_features]
     target = ml_data['estimatedRevenue']
     
+    st.markdown("### Correlation Analysis")
+
+    # Combining features + target into one DataFrame for correlation
+    corr_data = ml_data[selected_features + ['estimatedRevenue']].corr()
+    
+    # Displaying the correlation matrix numerically
+    st.write("#### Numerical Correlation Matrix")
+    st.write(corr_data)
+    
+    # Displaying a correlation heatmap
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.heatmap(corr_data, annot=True, cmap='coolwarm', ax=ax)
+    st.pyplot(fig)
+
+    
     # Split the data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, random_state=42)
     
@@ -448,9 +603,11 @@ with tabs[8]:
     
     st.write("**Model Performance:**")
     st.write(f"R² Score: {r2:.2f}")
+    #st.write(f"Mean Squared Error: {mse:.2f}")
     
     st.markdown("## Feature Importance")
-    # Create a DataFrame for feature importances
+    
+    #feature importances
     feature_importances = pd.DataFrame({
         'Feature': features.columns,
         'Importance': model_rf.feature_importances_
