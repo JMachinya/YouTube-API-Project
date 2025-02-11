@@ -465,9 +465,9 @@ with tabs[7]:
         if col_max != col_min:
             df_scaled[col] = (df_scaled[col] - col_min) / (col_max - col_min)
 
-    st.subheader("Parallel Coordinates Plot (Improved)")
+    st.subheader("Parallel Coordinates Plot")
 
-    # We'll color by 'views' after scaling, so lines with higher (scaled) 'views' appear in a different color
+
     fig9 = px.parallel_coordinates(
         df_scaled,
         dimensions=features_for_parallel,
@@ -486,10 +486,22 @@ with tabs[7]:
     st.plotly_chart(fig10, use_container_width=True)
     
     st.subheader("Sharing Metrics by Service")
-    sharing_agg = sharing_metrics.groupby('sharingService')['shares'].sum().reset_index()
-    fig11 = px.bar(sharing_agg, x='sharingService', y='shares', 
-                   title="Total Shares by Sharing Service",
-                   labels={'sharingService': 'Sharing Service', 'shares': 'Total Shares'})
+
+    sharing_agg = (
+    sharing_metrics
+    .groupby('sharingService')['shares']
+    .sum()
+    .reset_index()
+    .sort_values('shares', ascending=False)  # <-- Sort by shares descending
+    )
+
+    fig11 = px.bar(
+    sharing_agg,
+    x='sharingService',
+    y='shares',
+    title="Total Shares by Sharing Service (Sorted)",
+    labels={'sharingService': 'Sharing Service', 'shares': 'Total Shares'}
+    )
     st.plotly_chart(fig11, use_container_width=True)
     
     st.subheader("Ad Type Metrics Treemap")
