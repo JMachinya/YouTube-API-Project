@@ -1,0 +1,221 @@
+1. Fetching data from the YouTube API into Database 
+
+```{python}
+
+import pandas as pd
+import datetime
+from sqlalchemy import create_engine
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+
+# Set up YouTube API connection
+API_KEY = "AIzaSyCW70WzNcZYDOz2-y8yJa7dAJgDke9kCqM"
+OAUTH_CREDENTIALS = "client_secret_29238299626-95koqi0a53ageu7d25tuikquappn3l22.apps.googleusercontent.com.json"
+
+# Initialize the YouTube Data API client
+youtube = build("youtube", "v3", developerKey=API_KEY)
+print("YouTube Data API connected successfully!")
+
+SCOPES = [
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+    "https://www.googleapis.com/auth/yt-analytics-monetary.readonly",
+    "https://www.googleapis.com/auth/youtube.readonly"
+]
+
+flow = InstalledAppFlow.from_client_secrets_file(OAUTH_CREDENTIALS, SCOPES)
+credentials = flow.run_local_server(port=0)
+youtube_analytics = build("youtubeAnalytics", "v2", credentials=credentials)
+print("YouTube Analytics API connected successfully!")
+
+# Function to fetch analytics data with optional filters
+def fetch_analytics_data(start_date, end_date, metrics, dimensions, sort, filters=None):
+    data = []
+    request = youtube_analytics.reports().query(
+        ids="channel==MINE",
+        startDate=start_date,
+        endDate=end_date,
+        metrics=metrics,
+        dimensions=dimensions,
+        sort=sort,
+        filters=filters
+    )
+    response = request.execute()
+
+    # Extract column headers as names
+    column_headers = [header["name"] for header in response["columnHeaders"]]
+
+    for row in response.get("rows", []):
+        entry = dict(zip(column_headers, row))
+        data.append(entry)
+    
+    return pd.DataFrame(data)
+
+# Function to fetch video comments
+def fetch_video_comments(video_id):
+    comments = []
+    request = youtube.commentThreads().list(
+        part="snippet",
+        videoId=video_id,
+        textFormat="plainText"
+    )
+    
+    response = request.execute()
+    
+    # Collect comments from the response
+    while response:
+        for item in response["items"]:
+            comment = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
+            comments.append(comment)
+        
+        # Check if there are more pages of comments
+        if "nextPageToken" in response:
+            request = youtube.commentThreads().list(
+                part="snippet",
+                videoId=video_id,
+                pageToken=response["nextPageToken"],
+                textFormat="plainText"
+            )
+            response = request.execute()
+        else:
+            break
+    
+    return comments
+
+# Function to get video IDs from the channel
+def get_video_ids(channel_id):
+    video_ids = []
+    request = youtube.search().list(
+        part="snippet",
+        channelId=channel_id,
+        maxResults=50,  # Adjust the number as needed
+        type="video"
+    )
+    
+    response = request.execute()
+    
+    for item in response["items"]:
+        video_ids.append(item["id"]["videoId"])
+    
+    return video_ids
+
+# Set up SQLAlchemy connection to PostgreSQL
+engine = create_engine(
+    "postgresql://u6carim280tos:"
+    "pb0b5f2d1b6f8e56b8c9390976ff40f1ad771704b9be4fd354f5078b000f36218"
+    "@c9uss87s9bdb8n.cluster-czrs8kj4isg7.us-east-1.rds.amazonaws.com:5432/"
+    "dddt68gd2mesif"
+)
+
+# Fetch and insert all datasets into PostgreSQL
+def insert_data_from_api():
+    
+    start_date = "2019-09-01"  # Adjust as needed
+    end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    # Fetch daily video metrics
+    daily_video_df = fetch_analytics_data(
+        start_date=start_date,
+        end_date=end_date,
+        metrics="views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained",
+        dimensions="day",
+        sort="day"
+    )
+
+    # Insert data into PostgreSQL
+    daily_video_df.to_sql('daily_video_metrics', engine, if_exists='replace', index=False)
+    print("daily_video_metrics data inserted into PostgreSQL.")
+
+    # Fetch comments from each video
+    channel_id = "UCiosg1akiDnp4fq513TOmmw"
+    video_ids = get_video_ids(channel_id)
+    
+    all_comments = []
+    for video_id in video_ids:
+        comments = fetch_video_comments(video_id)
+        for comment in comments:
+            all_comments.append({"video_id": video_id, "comment": comment})
+    
+    # Create a DataFrame for comments
+    comments_df = pd.DataFrame(all_comments)
+
+    # Insert comments into PostgreSQL
+    comments_df.to_sql('comments', engine, if_exists='replace', index=False)
+    print("Comments data inserted into PostgreSQL.")
+
+    # Fetch other metrics and insert them into PostgreSQL (e.g., daily annotation metrics, traffic source, etc.)
+    # You can repeat the process for the other queries like `daily_annotation_metrics`, `traffic_source_metrics`, etc.
+    for query in queries:
+        print(f"Fetching data for {query['name']}...")
+        df = fetch_analytics_data(
+            start_date=start_date,
+            end_date=end_date,
+            metrics=query["metrics"],
+            dimensions=query["dimensions"],
+            sort=query["sort"],
+            filters=query.get("filters")  # Pass filters if present
+        )
+        # Insert data into the database
+        df.to_sql(query["name"], engine, if_exists='replace', index=False)
+        print(f"{query['name']} data inserted into PostgreSQL.")
+
+# Define the queries based on the documentation (metrics, dimensions, etc.)
+queries = [
+    {
+        "name": "daily_annotation_metrics",
+        "metrics": "views,likes,annotationClickThroughRate,annotationCloseRate,annotationImpressions",
+        "dimensions": "day",
+        "sort": "day"
+    },
+    {
+        "name": "daily_country_specific_metrics",
+        "metrics": "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained",
+        "dimensions": "country",
+        "sort": "-estimatedMinutesWatched"
+    },
+    {
+        "name": "traffic_source_metrics",
+        "metrics": "views,estimatedMinutesWatched",
+        "dimensions": "day,insightTrafficSourceType",
+        "sort": "day"
+    },
+    {
+        "name": "revenue_metrics",
+        "metrics": "views,estimatedRevenue,estimatedAdRevenue,estimatedRedPartnerRevenue,grossRevenue,adImpressions,cpm,playbackBasedCpm,monetizedPlaybacks",
+        "dimensions": "day",
+        "sort": "day"
+    },
+    {
+        "name": "ad_type_metrics",
+        "metrics": "grossRevenue,adImpressions,cpm",
+        "dimensions": "adType",
+        "sort": "-adType"
+    },
+    {
+        "name": "sharing_metrics",
+        "metrics": "shares",
+        "dimensions": "sharingService",
+        "sort": "-shares"
+    },
+    {
+        "name": "province_metrics",
+        "metrics": "views,estimatedMinutesWatched,averageViewDuration",
+        "dimensions": "province",
+        "filters": "country==US", 
+        "sort": "province"
+    },
+    
+    {
+    "name": "demographic_metrics",
+    "metrics": "viewerPercentage",
+    "dimensions": "ageGroup,gender",
+    "sort": "gender,ageGroup"
+    
+
+    }
+]
+
+# Run the function to insert data from the API
+insert_data_from_api()
+
+```
+
