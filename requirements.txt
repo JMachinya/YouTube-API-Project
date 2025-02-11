@@ -10,3 +10,4 @@ scikit-learn
 textblob
 psycopg2-binary
 statsmodels
+seaborn
